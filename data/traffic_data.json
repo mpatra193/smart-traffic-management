@@ -1,0 +1,15 @@
+{
+  "status": "stopped",
+  "final_unique_count": 33,
+  "turning_stats": {
+    "unknown": 21,
+    "straight": 11,
+    "right_turn": 1
+  },
+  "lane_stats": {
+    "left": 12,
+    "center": 24,
+    "right": 2
+  },
+  "shutdown_time": "2025-09-10 15:25:06"
+}

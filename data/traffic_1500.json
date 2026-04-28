@@ -1,0 +1,11 @@
+{
+  "period": "2025-09-09 15:00 to 2025-09-09 15:29",
+  "total_unique_vehicles": 202,
+  "turning_movements": {
+    "straight": 99,
+    "left_turn": 0,
+    "right_turn": 10,
+    "u_turn": 0
+  },
+  "timestamp": "2025-09-09 15:29"
+}
