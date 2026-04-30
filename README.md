@@ -1,10 +1,10 @@
-## 🚦 Smart Traffic Management System  
+## 🚦 Traffic Route Optimizer  
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-green.svg)](https://www.python.org)
 [![Flask](https://img.shields.io/badge/Framework-Flask-orange.svg)](https://flask.palletsprojects.com/)
 [![Open Source? Yes!](https://badgen.net/badge/Open%20Source%20%3F/Yes%21/blue?icon=github)](https://github.com/Naereen/badges)
 
-> A real-time smart traffic management system developed for **Smart India Hackathon (SIH)** to reduce urban congestion using adaptive signal control, traffic prediction, and AI-based analytics.
+> A real-time traffic route optimizer developed for **Smart India Hackathon (SIH)** to reduce urban congestion using adaptive signal control, traffic prediction, and AI-based analytics.
 
 ![Demo](Prototype/demo.gif)
 
@@ -13,7 +13,7 @@
 
 ## 🔍 Overview
 
-Urban traffic congestion leads to increased travel time, pollution, and fuel consumption. This **Smart Traffic Management System (STMS)** leverages real-time data from sensors/cameras and historical traffic patterns to dynamically adjust traffic signal timings, predict congestion, and optimize vehicle flow across intersections.
+Urban traffic congestion leads to increased travel time, pollution, and fuel consumption. This **Traffic Route Optimizer** leverages real-time data from sensors/cameras and historical traffic patterns to dynamically adjust traffic signal timings, predict congestion, and optimize vehicle flow across intersections.
 
 Built during **Smart India Hackathon**, this solution aims to make city transportation smarter, safer, and more efficient using modern technologies such as **machine learning**, **IoT**, and **real-time web interfaces**.
 
@@ -69,8 +69,8 @@ Built during **Smart India Hackathon**, this solution aims to make city transpor
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/subham711-dot/Smart-Traffic-Management-System-SIH.git
-   cd Smart-Traffic-Management-System-SIH
+   git clone https://github.com/subham711-dot/Traffic-Route-Optimizer.git
+   cd Traffic-Route-Optimizer
    ```
 
 2. **Create virtual environment (recommended)**
@@ -94,7 +94,7 @@ Built during **Smart India Hackathon**, this solution aims to make city transpor
 
 ## 🖼️ Project Structure
 ```
-Smart-Traffic-Management-System-SIH/
+Traffic-Route-Optimizer/
 │
 ├── app.py                    # Main Flask application
 ├── config.py                 # Configuration settings
