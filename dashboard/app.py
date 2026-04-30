@@ -164,7 +164,7 @@ if not cap.isOpened():
     st.stop()
 
 # --- LOGGING SETUP ---
-LOG_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "traffic_log.json")
+LOG_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "traffic_log.jsonl")
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 # --- DASHBOARD PLACEHOLDERS SETUP ---

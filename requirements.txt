@@ -3,3 +3,7 @@ ultralytics
 opencv-python
 deep-translator
 torch
+pandas
+pydeck
+requests
+polyline
