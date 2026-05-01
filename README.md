@@ -5,7 +5,7 @@
 
 > A real-time traffic route optimizer developed to reduce urban congestion using computer vision, adaptive signal control, and reinforcement learning.
 
-## 🔍 Overview
+## Overview
 
 Urban traffic congestion leads to increased travel time, pollution, and fuel consumption. This **Traffic Route Optimizer** leverages real-time computer vision (YOLO) and a hybrid AI decision engine to dynamically adjust traffic signal timings and optimize vehicle flow across intersections.
 
@@ -13,7 +13,7 @@ This solution aims to make city transportation smarter, safer, and more efficien
 
 ---
 
-## ✨ Features
+## Features
 
 ✅ **Computer Vision Vehicle Detection**  
    - Uses YOLO models to accurately detect, classify, and count vehicles from live camera feeds, differentiating directional traffic flows.
@@ -46,7 +46,7 @@ This solution aims to make city transportation smarter, safer, and more efficien
 
 ---
 
-## 📦 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - Python 3.8 or higher
@@ -84,7 +84,7 @@ This solution aims to make city transportation smarter, safer, and more efficien
 
 ---
 
-## 🖼️ Project Structure
+## Project Structure
 ```
 routing-ml/
 │
@@ -107,7 +107,7 @@ routing-ml/
 
 ---
 
-## 🎯 How It Works
+## How It Works
 
 1. **Input**: Live video feed from local MP4 simulations or direct CCTV.
 2. **Detection**: OpenCV and YOLOv8 process the frames to identify vehicles per directional lane.
@@ -117,7 +117,7 @@ routing-ml/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please read our [Contribution Guidelines](CONTRIBUTING.md) before submitting a pull request.
 
@@ -129,7 +129,7 @@ Contributions are welcome! Please read our [Contribution Guidelines](CONTRIBUTIN
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
 
