@@ -7,15 +7,23 @@ model = YOLO('yolo11n.pt')  # or yolov8s.pt / yolo11s.pt for better accuracy
 VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck
 
 # Check GPU availability
-device = "cpu"
-print(f"Using device: {device}")
+if torch.cuda.is_available():
+    device = "cuda"
+elif torch.backends.mps.is_available():
+    device = "mps"
+else:
+    device = "cpu"
+    
+print(f"Using device for YOLO: {device}")
 model.to(device)
 
 def detect_vehicles_in_frame(frame):
     """
     Returns total vehicle count in frame.
     """
-    results = model(frame, verbose=False, device=device)
+    # imgsz=640 speeds up inference by ensuring standard sizing, half=True uses FP16 on GPU
+    half_precision = device != "cpu"
+    results = model(frame, verbose=False, device=device, imgsz=640, half=half_precision)
     count = 0
     for result in results:
         for cls in result.boxes.cls:
@@ -32,7 +40,8 @@ def detect_vehicles_by_zone(frame, crossing_type="2-way"):
     h, w = frame.shape[:2]
     counts = {"left": 0, "right": 0}
 
-    results = model(frame, verbose=False, device=device)
+    half_precision = device != "cpu"
+    results = model(frame, verbose=False, device=device, imgsz=640, half=half_precision)
     annotated_frame = results[0].plot()  # Draw YOLO bounding boxes!
 
     for result in results:

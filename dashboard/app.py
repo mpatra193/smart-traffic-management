@@ -8,21 +8,28 @@ import cv2
 import time
 import json
 from datetime import datetime
+from collections import deque
 from deep_translator import GoogleTranslator
 from models.traffic_ai import get_signal_timing
 from mock_data.simulator import is_emergency_vehicle
 import importlib
+
 import detector.detector
 importlib.reload(detector.detector)
 from detector.detector import detect_vehicles_in_frame, detect_vehicles_by_zone
+
+import utils.stream_handler
+importlib.reload(utils.stream_handler)
+from utils.stream_handler import StreamHandler
 import pandas as pd
 import pydeck as pdk
 import requests
 import polyline
+import networkx as nx
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="🚦 Traffic Route Optimizer", layout="wide")
-st.title("🚦 Traffic Route Optimizer")
+st.set_page_config(page_title="Traffic Route Optimizer", layout="wide")
+st.title("Traffic Route Optimizer")
 
 # --- LANGUAGE ---
 lang = st.sidebar.selectbox("Select Language", ["English", "Hindi", "Tamil"])
@@ -41,6 +48,7 @@ def translate_text(text, target_lang):
 import heapq
 import random
 
+@st.cache_data(show_spinner=False, ttl=3600)
 def get_osrm_route(waypoints):
     """Fetches actual road geometry through waypoints from OSRM.
     waypoints: list of (lat, lon) tuples.
@@ -60,75 +68,46 @@ def get_osrm_route(waypoints):
 
 def dijkstra(graph, weights, source, target):
     """
-    Dijkstra's shortest path.
-    graph   : dict {node_id: [neighbor_id, ...]}
-    weights : dict {node_id: congestion_score}  (higher = more congested)
-    Edge cost = avg congestion of the two endpoints.
-    Returns ordered list of node IDs on the shortest path.
+    (Deprecated - Now using networkx in main loop)
     """
-    dist = {n: float('inf') for n in graph}
-    prev = {n: None for n in graph}
-    dist[source] = 0
-    heap = [(0, source)]
+    pass
 
-    while heap:
-        d, u = heapq.heappop(heap)
-        if d > dist[u]:
-            continue
-        if u == target:
-            break
-        for v in graph[u]:
-            edge_cost = (weights.get(u, 1) + weights.get(v, 1)) / 2
-            nd = dist[u] + edge_cost
-            if nd < dist[v]:
-                dist[v] = nd
-                prev[v] = u
-                heapq.heappush(heap, (nd, v))
-
-    # Reconstruct path
-    path, node = [], target
-    while node is not None:
-        path.append(node)
-        node = prev[node]
-    path.reverse()
-    return path if path[0] == source else []
-
-# ─── 25 CCTV cameras forming a dense grid in Bandra, Mumbai ───────────────
+# ─── 25 CCTV cameras forming a dense grid in Bhubaneswar, Odisha ───────────────
 CCTV_POINTS = [
-    # Area 1: SV Road North (Intersection video)
-    {"id": "CAM-01", "name": "SV Road & Station Rd",          "lat": 19.0540, "lon": 72.8376, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-02", "name": "SV Road & Hill Road",           "lat": 19.0572, "lon": 72.8361, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-03", "name": "SV Road & Linking Road",        "lat": 19.0604, "lon": 72.8347, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-04", "name": "SV Road & Perry Cross Road",    "lat": 19.0636, "lon": 72.8368, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-05", "name": "SV Road & Mount Mary Steps",    "lat": 19.0661, "lon": 72.8382, "video": "intersection.mp4", "type": "2-way"},
-    
-    # Area 2: Linking Road (Singapore video - 4-way)
-    {"id": "CAM-06", "name": "Linking Road & Waterfield Road","lat": 19.0610, "lon": 72.8305, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-07", "name": "Linking Road & 33rd Road",      "lat": 19.0650, "lon": 72.8340, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-08", "name": "Linking Road & 14th Road",      "lat": 19.0680, "lon": 72.8335, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-09", "name": "Linking Road & Main Avenue",    "lat": 19.0710, "lon": 72.8340, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-10", "name": "Linking Road & Santa Cruz N",   "lat": 19.0740, "lon": 72.8350, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    # Row 0: Lat 20.26 (South)
+    {"id": "CAM-01", "name": "Khandagiri Square",       "lat": 20.2589, "lon": 85.7831, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-02", "name": "Ganga Nagar",             "lat": 20.2590, "lon": 85.8120, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-03", "name": "AG Square",               "lat": 20.2625, "lon": 85.8318, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-04", "name": "Raj Mahal Square",        "lat": 20.2625, "lon": 85.8385, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-05", "name": "Kalpana Square",          "lat": 20.2543, "lon": 85.8432, "video": "intersection.mp4", "type": "4-way"},
 
-    # Area 3: Hill Road & Turner (Vietnam video - 2-way dense)
-    {"id": "CAM-11", "name": "Hill Road & St Andrews Road",   "lat": 19.0558, "lon": 72.8291, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-12", "name": "Turner Road & Hill Road",       "lat": 19.0542, "lon": 72.8258, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-13", "name": "Waterfield Road & Turner Road", "lat": 19.0570, "lon": 72.8310, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-14", "name": "Ambedkar Road & Pali Naka",     "lat": 19.0625, "lon": 72.8290, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-15", "name": "Pali Hill & Perry Cross Road",  "lat": 19.0651, "lon": 72.8315, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    
-    # Area 4: Carter Road (Singapore video - 4-way)
-    {"id": "CAM-16", "name": "Carter Road & Chapel Road",     "lat": 19.0648, "lon": 72.8257, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-17", "name": "Carter Road & Union Park",      "lat": 19.0700, "lon": 72.8250, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-18", "name": "Carter Road & Joggers Park",    "lat": 19.0730, "lon": 72.8260, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-19", "name": "Carter Road & Rizvi College",   "lat": 19.0760, "lon": 72.8270, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-20", "name": "Carter Road & Khar Danda",      "lat": 19.0790, "lon": 72.8280, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    # Row 1: Lat 20.27
+    {"id": "CAM-06", "name": "Fire Station Square",     "lat": 20.2721, "lon": 85.7981, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    {"id": "CAM-07", "name": "Siripur Square",          "lat": 20.2730, "lon": 85.8100, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    {"id": "CAM-08", "name": "Unit 4 Market",           "lat": 20.2730, "lon": 85.8250, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
+    {"id": "CAM-09", "name": "Master Canteen",          "lat": 20.2666, "lon": 85.8436, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    {"id": "CAM-10", "name": "Cuttack Road South",      "lat": 20.2710, "lon": 85.8450, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
 
-    # Area 5: Highway / Major Junctions (Vietnam video - 2-way dense)
-    {"id": "CAM-21", "name": "WEH & Bandra East",             "lat": 19.0550, "lon": 72.8450, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-22", "name": "WEH & Kalanagar Junction",      "lat": 19.0580, "lon": 72.8470, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-23", "name": "WEH & BKC Connector",           "lat": 19.0620, "lon": 72.8490, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-24", "name": "WEH & Vakola Flyover",          "lat": 19.0680, "lon": 72.8520, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-25", "name": "WEH & Santa Cruz Airport",      "lat": 19.0750, "lon": 72.8550, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
+    # Row 2: Lat 20.28
+    {"id": "CAM-11", "name": "CRP Square",              "lat": 20.2853, "lon": 85.8080, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
+    {"id": "CAM-12", "name": "Nayapalli",               "lat": 20.2850, "lon": 85.8150, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
+    {"id": "CAM-13", "name": "Shastri Nagar",           "lat": 20.2850, "lon": 85.8250, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
+    {"id": "CAM-14", "name": "Ram Mandir Square",       "lat": 20.2766, "lon": 85.8415, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
+    {"id": "CAM-15", "name": "Bomikhal",                "lat": 20.2844, "lon": 85.8465, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
+
+    # Row 3: Lat 20.29
+    {"id": "CAM-16", "name": "Rental Colony",           "lat": 20.2910, "lon": 85.8050, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
+    {"id": "CAM-17", "name": "IRC Village",             "lat": 20.2910, "lon": 85.8120, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    {"id": "CAM-18", "name": "Acharya Vihar",           "lat": 20.2965, "lon": 85.8245, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    {"id": "CAM-19", "name": "Rupali Square",           "lat": 20.2882, "lon": 85.8368, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
+    {"id": "CAM-20", "name": "VSS Nagar",               "lat": 20.2910, "lon": 85.8450, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
+
+    # Row 4: Lat 20.30
+    {"id": "CAM-21", "name": "Baramunda",               "lat": 20.2711, "lon": 85.7932, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
+    {"id": "CAM-22", "name": "Jayadev Vihar Square",    "lat": 20.3013, "lon": 85.8175, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
+    {"id": "CAM-23", "name": "Sainik School",           "lat": 20.3010, "lon": 85.8250, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
+    {"id": "CAM-24", "name": "Vani Vihar",              "lat": 20.2942, "lon": 85.8340, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
+    {"id": "CAM-25", "name": "Rasulgarh Square",        "lat": 20.2982, "lon": 85.8491, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
 ]
 
 # Road graph: which cameras are connected by direct roads
@@ -141,14 +120,25 @@ ROAD_GRAPH = {
     20: [0, 21], 21: [20, 22], 22: [21, 23], 23: [22, 24], 24: [23]
 }
 
+# Pre-build NetworkX graph
+G_ROAD = nx.Graph()
+for node, neighbors in ROAD_GRAPH.items():
+    for neighbor in neighbors:
+        G_ROAD.add_edge(node, neighbor)
+
 # --- ROUTING & CAMERA CONTROLS ---
 st.sidebar.markdown("---")
 cam_names = [cam["name"] for cam in CCTV_POINTS]
-active_cam_name = st.sidebar.selectbox("🎥 View Live Feed From:", cam_names, index=5)
+active_cam_name = st.sidebar.selectbox("View Live Feed From:", cam_names, index=5)
 st.sidebar.markdown("---")
-st.sidebar.subheader("🚑 Emergency Routing")
+st.sidebar.subheader("Emergency Routing")
 source_cam_name = st.sidebar.selectbox("From (Source)", cam_names, index=0)
 dest_cam_name = st.sidebar.selectbox("To (Destination)", cam_names, index=24)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Stream Source (Tier 1)")
+custom_url = st.sidebar.text_input("Custom Stream URL (RTSP/YouTube)", value="", help="Leave blank to use public defaults / offline video")
+stream_status = st.sidebar.empty()
 
 active_cam_idx = cam_names.index(active_cam_name)
 active_cam = CCTV_POINTS[active_cam_idx]
@@ -157,52 +147,66 @@ dest_idx = cam_names.index(dest_cam_name)
 
 # --- VIDEO SETUP ---
 video_path = os.path.join(os.path.dirname(__file__), "..", "data", active_cam["video"])
-cap = cv2.VideoCapture(video_path)
 
-if not cap.isOpened():
-    st.error("❌ Could not open video/webcam. Check path or connection.")
-    st.stop()
+if 'stream_handler' not in st.session_state:
+    st.session_state.stream_handler = StreamHandler(primary_url=custom_url, default_video_path=video_path)
+    st.session_state.stream_handler.start()
+else:
+    if st.session_state.stream_handler.primary_url != custom_url or st.session_state.stream_handler.default_video_path != video_path:
+        st.session_state.stream_handler.stop()
+        st.session_state.stream_handler = StreamHandler(primary_url=custom_url, default_video_path=video_path)
+        st.session_state.stream_handler.start()
+
+cap = st.session_state.stream_handler
 
 # --- LOGGING SETUP ---
 LOG_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "traffic_log.jsonl")
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 # --- DASHBOARD PLACEHOLDERS SETUP ---
+if 'history_time' not in st.session_state:
+    st.session_state.history_time = deque(maxlen=50)
+    st.session_state.history_ns = deque(maxlen=50)
+    st.session_state.history_ew = deque(maxlen=50)
+
 st.markdown("---")
-col1, col2, col3 = st.columns([1, 1.5, 1.5])
 
-with col1:
-    st.subheader(translate_text("🚦 Real-Time Signal Control", lang))
-    mode_metric = st.empty()
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Sub-columns for stable layout (labels never redraw)
-    col_label, col_val = st.columns([2, 1])
-    
-    with col_label:
-        st.write(translate_text("**🟢 North-South Green:**", lang))
-        st.write(translate_text("**🟢 East-West Green:**", lang))
-        st.write(translate_text("**🚗 Total Vehicles:**", lang))
-        st.write(translate_text("**⬅️ Left Lane:**", lang))
-        st.write(translate_text("**➡️ Right Lane:**", lang))
-        
-    with col_val:
-        ns_green = st.empty()
-        ew_green = st.empty()
-        tot_veh_metric = st.empty()
-        left_lane = st.empty()
-        right_lane = st.empty()
-        
-    emerg_alert = st.empty()
-    wait_saved = st.empty()
+# 1. High-Level KPI Row
+kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+with kpi_col1:
+    kpi_total_vehicles = st.empty()
+with kpi_col2:
+    kpi_mode = st.empty()
+with kpi_col3:
+    kpi_wait_saved = st.empty()
 
-with col2:
-    st.subheader(translate_text("📹 Live Feed", lang))
+st.markdown("---")
+
+# 2. Live Monitoring Section
+feed_col1, feed_col2 = st.columns([1, 1])
+
+with feed_col1:
+    st.subheader(translate_text("Live Video Feed", lang))
     video_feed = st.empty()
+    emerg_alert = st.empty()
 
-with col3:
-    st.subheader(translate_text("🗺️ Mumbai Intersection", lang))
+with feed_col2:
+    st.subheader(translate_text("Bhubaneswar Map & Routing", lang))
     map_feed = st.empty()
+
+st.markdown("---")
+
+# 3. Analytics & Trends Section
+st.subheader(translate_text("System Analytics", lang))
+chart_col1, chart_col2 = st.columns([1, 1])
+
+with chart_col1:
+    st.markdown("**Traffic Volume Trend (Last 50 frames)**")
+    volume_chart = st.empty()
+
+with chart_col2:
+    st.markdown("**Current Signal Efficiency Allocation**")
+    efficiency_chart = st.empty()
 
 frame_skip = 5
 frame_count = 0
@@ -215,10 +219,13 @@ last_osrm_route = []
 city_traffic = [{"ns": random.randint(2, 12), "ew": random.randint(2, 12)} for _ in range(25)]
 
 # --- MAIN LOOP ---
-while cap.isOpened():
+while cap.running:
     ret, frame = cap.read()
     if not ret:
-        break
+        time.sleep(0.05)
+        continue
+        
+    stream_status.info(f"Current Source:\n{cap.get_source_type()}")
 
     frame_count += 1
     if frame_count % frame_skip != 0:
@@ -253,27 +260,39 @@ while cap.isOpened():
         with open(LOG_FILE, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
     except Exception as e:
-        st.warning(f"⚠️ Log write failed: {e}")
+        st.warning(f"Log write failed: {e}")
 
     # 🖥️ UPDATE DASHBOARD
-    mode_metric.metric(translate_text("Mode", lang), translate_text(signal_plan["mode"], lang))
-    
-    # Only update the numbers, leaves the text completely untouched
-    ns_green.write(f"**{signal_plan['green_ns']} sec**")
-    ew_green.write(f"**{signal_plan['green_ew']} sec**")
-    tot_veh_metric.write(f"**{total_vehicles}**")
-    left_lane.write(f"**{zone_counts['left']}**")
-    right_lane.write(f"**{zone_counts['right']}**")
-    
+    # KPI Row
+    kpi_total_vehicles.metric("Total Network Congestion", total_vehicles)
+    kpi_mode.metric("Active Signal Mode", translate_text(signal_plan["mode"], lang))
+    kpi_wait_saved.metric("Estimated Wait Time Saved", f"{signal_plan['wait_saved']} sec")
+
     if emergency:
-        emerg_alert.warning(translate_text("🚑 EMERGENCY VEHICLE DETECTED — GREEN WAVE ACTIVATED", lang))
+        emerg_alert.warning(translate_text("EMERGENCY VEHICLE DETECTED — GREEN WAVE ACTIVATED", lang))
     else:
         emerg_alert.empty()
-        
-    wait_saved.success(translate_text(f"⏱️ Estimated Wait Time Saved: {signal_plan['wait_saved']} sec", lang))
 
+    # Video Feed
     annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
     video_feed.image(annotated_rgb, width='stretch')
+    
+    # Analytics Row
+    st.session_state.history_time.append(datetime.now().strftime("%H:%M:%S"))
+    st.session_state.history_ns.append(ns_count)
+    st.session_state.history_ew.append(ew_count)
+    
+    df_vol = pd.DataFrame({
+        "North-South": list(st.session_state.history_ns),
+        "East-West": list(st.session_state.history_ew)
+    })
+    volume_chart.line_chart(df_vol, height=250)
+
+    df_eff = pd.DataFrame({
+        "Direction": ["North-South", "East-West"],
+        "Green Time (sec)": [signal_plan["green_ns"], signal_plan["green_ew"]]
+    }).set_index("Direction")
+    efficiency_chart.bar_chart(df_eff, height=250)
 
     # 🗺️ UPDATE MAP — Dijkstra + OSRM on 25 CCTVs, Bandra West
     current_map_state = f"{ns_count}_{ew_count}_{source_idx}_{dest_idx}_{active_cam_idx}"
@@ -318,12 +337,27 @@ while cap.isOpened():
             })
 
         # --- Step 2: Dijkstra — least-congested path from user-selected Source to Destination ---
-        dijk_path = dijkstra(ROAD_GRAPH, cam_scores, source=source_idx, target=dest_idx)
+        # Update edge weights in NetworkX graph
+        for u, v in G_ROAD.edges():
+            w_u = cam_scores.get(u, 1)
+            w_v = cam_scores.get(v, 1)
+            
+            # Exponential penalty to aggressively avoid red nodes (heavy traffic)
+            cost_u = w_u * 10 if w_u > 15 else w_u
+            cost_v = w_v * 10 if w_v > 15 else w_v
+            
+            G_ROAD[u][v]['weight'] = 1.0 + ((cost_u + cost_v) / 2)
+            
+        try:
+            dijk_path = nx.shortest_path(G_ROAD, source=source_idx, target=dest_idx, weight='weight')
+        except nx.NetworkXNoPath:
+            dijk_path = []
 
         # --- Step 3: If path changed, call OSRM for real road geometry ---
         if dijk_path and dijk_path != last_dijkstra_path:
             last_dijkstra_path = dijk_path
-            waypoints = [(CCTV_POINTS[i]["lat"], CCTV_POINTS[i]["lon"]) for i in dijk_path]
+            # Convert to tuple of tuples so it's hashable for st.cache_data
+            waypoints = tuple((CCTV_POINTS[i]["lat"], CCTV_POINTS[i]["lon"]) for i in dijk_path)
             osrm_path = get_osrm_route(waypoints)
             last_osrm_route = osrm_path if osrm_path else []
 
@@ -364,13 +398,13 @@ while cap.isOpened():
             pickable=False
         )
 
-        # Centre map between all cameras
-        mid = CCTV_POINTS[4]  # Hill Road camera ~ geographic center
+        # Centre map on Jayadev Vihar (Row 4, Col 1 roughly middle)
+        mid = CCTV_POINTS[21]  # Jayadev Vihar Square
         view_state = pdk.ViewState(
             latitude=mid["lat"],
             longitude=mid["lon"],
-            zoom=14.2,
-            pitch=40
+            zoom=12.5,
+            pitch=45
         )
 
         map_feed.pydeck_chart(pdk.Deck(
@@ -382,5 +416,6 @@ while cap.isOpened():
     time.sleep(0.00001)
 
 # --- END ---
-cap.release()
-st.success(translate_text("✅ Simulation Complete — Ready for Deployment Across India!", lang))
+if 'stream_handler' in st.session_state:
+    st.session_state.stream_handler.stop()
+st.success(translate_text("Simulation Complete — Ready for Deployment Across India!", lang))

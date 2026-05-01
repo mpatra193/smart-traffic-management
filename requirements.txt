@@ -7,3 +7,7 @@ pandas
 pydeck
 requests
 polyline
+networkx
+scikit-learn
+numpy
+yt-dlp
