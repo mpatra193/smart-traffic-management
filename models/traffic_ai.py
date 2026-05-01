@@ -37,20 +37,20 @@ def _rule_based_engine(ns_count, ew_count):
         return {
             "green_ns": 25,
             "green_ew": 35,
-            "mode": "🌿 LIGHT TRAFFIC (Rule-Based)",
+            "mode": "LIGHT TRAFFIC (Rule-Based)",
             "wait_saved": 5
         }
 
     ratio = ns_count / (ew_count + 1)
 
     if ratio > 2.0:
-        return {"green_ns": 50, "green_ew": 15, "mode": "🚦 NS HEAVY FLOW (Rule-Based)", "wait_saved": 15}
+        return {"green_ns": 50, "green_ew": 15, "mode": "NS HEAVY FLOW (Rule-Based)", "wait_saved": 15}
     elif ratio > 1.2:
-        return {"green_ns": 40, "green_ew": 25, "mode": "🚗 NS MODERATE (Rule-Based)", "wait_saved": 10}
+        return {"green_ns": 40, "green_ew": 25, "mode": "NS MODERATE (Rule-Based)", "wait_saved": 10}
     elif ratio < 0.5:
-        return {"green_ns": 15, "green_ew": 50, "mode": "🚦 EW HEAVY FLOW (Rule-Based)", "wait_saved": 15}
+        return {"green_ns": 15, "green_ew": 50, "mode": "EW HEAVY FLOW (Rule-Based)", "wait_saved": 15}
     else:
-        return {"green_ns": 30, "green_ew": 30, "mode": "🌿 BALANCED FLOW (Rule-Based)", "wait_saved": 8}
+        return {"green_ns": 30, "green_ew": 30, "mode": "BALANCED FLOW (Rule-Based)", "wait_saved": 8}
 
 
 def get_signal_timing(ns_count, ew_count, is_emergency=False):
@@ -65,7 +65,7 @@ def get_signal_timing(ns_count, ew_count, is_emergency=False):
         return {
             "green_ns": 60,
             "green_ew": 10,
-            "mode": "🚑 EMERGENCY OVERRIDE",
+            "mode": "EMERGENCY OVERRIDE",
             "wait_saved": 45
         }
 

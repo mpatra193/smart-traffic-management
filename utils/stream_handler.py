@@ -12,10 +12,7 @@ class StreamHandler:
         
         # Curated public streams (Backup Tier 2)
         # Note: These URLs represent typical live traffic streams.
-        self.curated_streams = [
-            "https://www.youtube.com/watch?v=1EiC9bvVGnk", # Jackson Hole Town Square (example)
-            "https://www.youtube.com/watch?v=KBsqQez-O4w"  # Tokyo Live Cam (example)
-        ]
+        self.curated_streams = []
         
         self.max_retries = max_retries
         

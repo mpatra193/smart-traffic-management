@@ -21,8 +21,8 @@ class TrafficDQN(nn.Module):
 
 # Discrete Action Space Mapping
 ACTION_SPACE = {
-    0: {"green_ns": 60, "green_ew": 15, "mode": "🚦 NS HEAVY FLOW (RL Opt)"},
-    1: {"green_ns": 40, "green_ew": 25, "mode": "🚗 NS MODERATE (RL Opt)"},
-    2: {"green_ns": 25, "green_ew": 40, "mode": "🚗 EW MODERATE (RL Opt)"},
-    3: {"green_ns": 15, "green_ew": 60, "mode": "🚦 EW HEAVY FLOW (RL Opt)"}
+    0: {"green_ns": 60, "green_ew": 15, "mode": "NS HEAVY FLOW (RL Opt)"},
+    1: {"green_ns": 40, "green_ew": 25, "mode": "NS MODERATE (RL Opt)"},
+    2: {"green_ns": 25, "green_ew": 40, "mode": "EW MODERATE (RL Opt)"},
+    3: {"green_ns": 15, "green_ew": 60, "mode": "EW HEAVY FLOW (RL Opt)"}
 }

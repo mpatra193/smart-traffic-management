@@ -29,6 +29,16 @@ import networkx as nx
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Traffic Route Optimizer", layout="wide")
+
+# Custom CSS to reduce the font size of metrics to prevent truncation
+st.markdown("""
+<style>
+[data-testid="stMetricValue"] {
+    font-size: 1.2rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("Traffic Route Optimizer")
 
 # --- LANGUAGE ---
@@ -82,32 +92,32 @@ CCTV_POINTS = [
     {"id": "CAM-05", "name": "Kalpana Square",          "lat": 20.2543, "lon": 85.8432, "video": "intersection.mp4", "type": "4-way"},
 
     # Row 1: Lat 20.27
-    {"id": "CAM-06", "name": "Fire Station Square",     "lat": 20.2721, "lon": 85.7981, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-07", "name": "Siripur Square",          "lat": 20.2730, "lon": 85.8100, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-08", "name": "Unit 4 Market",           "lat": 20.2730, "lon": 85.8250, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
-    {"id": "CAM-09", "name": "Master Canteen",          "lat": 20.2666, "lon": 85.8436, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-10", "name": "Cuttack Road South",      "lat": 20.2710, "lon": 85.8450, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
+    {"id": "CAM-06", "name": "Fire Station Square",     "lat": 20.2721, "lon": 85.7981, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-07", "name": "Siripur Square",          "lat": 20.2730, "lon": 85.8100, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-08", "name": "Unit 4 Market",           "lat": 20.2730, "lon": 85.8250, "video": "intersection.mp4", "type": "2-way"},
+    {"id": "CAM-09", "name": "Master Canteen",          "lat": 20.2666, "lon": 85.8436, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-10", "name": "Cuttack Road South",      "lat": 20.2710, "lon": 85.8450, "video": "intersection.mp4", "type": "2-way"},
 
     # Row 2: Lat 20.28
-    {"id": "CAM-11", "name": "CRP Square",              "lat": 20.2853, "lon": 85.8080, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
-    {"id": "CAM-12", "name": "Nayapalli",               "lat": 20.2850, "lon": 85.8150, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-13", "name": "Shastri Nagar",           "lat": 20.2850, "lon": 85.8250, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
-    {"id": "CAM-14", "name": "Ram Mandir Square",       "lat": 20.2766, "lon": 85.8415, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
-    {"id": "CAM-15", "name": "Bomikhal",                "lat": 20.2844, "lon": 85.8465, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
+    {"id": "CAM-11", "name": "CRP Square",              "lat": 20.2853, "lon": 85.8080, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-12", "name": "Nayapalli",               "lat": 20.2850, "lon": 85.8150, "video": "intersection.mp4", "type": "2-way"},
+    {"id": "CAM-13", "name": "Shastri Nagar",           "lat": 20.2850, "lon": 85.8250, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-14", "name": "Ram Mandir Square",       "lat": 20.2766, "lon": 85.8415, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-15", "name": "Bomikhal",                "lat": 20.2844, "lon": 85.8465, "video": "intersection.mp4", "type": "2-way"},
 
     # Row 3: Lat 20.29
-    {"id": "CAM-16", "name": "Rental Colony",           "lat": 20.2910, "lon": 85.8050, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
-    {"id": "CAM-17", "name": "IRC Village",             "lat": 20.2910, "lon": 85.8120, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-18", "name": "Acharya Vihar",           "lat": 20.2965, "lon": 85.8245, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-19", "name": "Rupali Square",           "lat": 20.2882, "lon": 85.8368, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "4-way"},
-    {"id": "CAM-20", "name": "VSS Nagar",               "lat": 20.2910, "lon": 85.8450, "video": "vecteezy_time-lapse-of-singapore-city_3397592.mov", "type": "2-way"},
+    {"id": "CAM-16", "name": "Rental Colony",           "lat": 20.2910, "lon": 85.8050, "video": "intersection.mp4", "type": "2-way"},
+    {"id": "CAM-17", "name": "IRC Village",             "lat": 20.2910, "lon": 85.8120, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-18", "name": "Acharya Vihar",           "lat": 20.2965, "lon": 85.8245, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-19", "name": "Rupali Square",           "lat": 20.2882, "lon": 85.8368, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-20", "name": "VSS Nagar",               "lat": 20.2910, "lon": 85.8450, "video": "intersection.mp4", "type": "2-way"},
 
     # Row 4: Lat 20.30
-    {"id": "CAM-21", "name": "Baramunda",               "lat": 20.2711, "lon": 85.7932, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-22", "name": "Jayadev Vihar Square",    "lat": 20.3013, "lon": 85.8175, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
-    {"id": "CAM-23", "name": "Sainik School",           "lat": 20.3010, "lon": 85.8250, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "2-way"},
-    {"id": "CAM-24", "name": "Vani Vihar",              "lat": 20.2942, "lon": 85.8340, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
-    {"id": "CAM-25", "name": "Rasulgarh Square",        "lat": 20.2982, "lon": 85.8491, "video": "vecteezy_ho-chi-minh-city-traffic-at-intersection-vietnam_1793410.mov", "type": "4-way"},
+    {"id": "CAM-21", "name": "Baramunda",               "lat": 20.2711, "lon": 85.7932, "video": "intersection.mp4", "type": "2-way"},
+    {"id": "CAM-22", "name": "Jayadev Vihar Square",    "lat": 20.3013, "lon": 85.8175, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-23", "name": "Sainik School",           "lat": 20.3010, "lon": 85.8250, "video": "intersection.mp4", "type": "2-way"},
+    {"id": "CAM-24", "name": "Vani Vihar",              "lat": 20.2942, "lon": 85.8340, "video": "intersection.mp4", "type": "4-way"},
+    {"id": "CAM-25", "name": "Rasulgarh Square",        "lat": 20.2982, "lon": 85.8491, "video": "intersection.mp4", "type": "4-way"},
 ]
 
 # Road graph: which cameras are connected by direct roads
@@ -202,11 +212,11 @@ chart_col1, chart_col2 = st.columns([1, 1])
 
 with chart_col1:
     st.markdown("**Traffic Volume Trend (Last 50 frames)**")
-    volume_chart = st.empty()
+    volume_container = st.empty()
 
 with chart_col2:
-    st.markdown("**Current Signal Efficiency Allocation**")
-    efficiency_chart = st.empty()
+    st.markdown("**Optimal Green Light Allocation**")
+    efficiency_container = st.empty()
 
 frame_skip = 5
 frame_count = 0
@@ -282,17 +292,39 @@ while cap.running:
     st.session_state.history_ns.append(ns_count)
     st.session_state.history_ew.append(ew_count)
     
-    df_vol = pd.DataFrame({
-        "North-South": list(st.session_state.history_ns),
-        "East-West": list(st.session_state.history_ew)
-    })
-    volume_chart.line_chart(df_vol, height=250)
+    with volume_container.container():
+        # Determine current trend
+        if ns_count > ew_count + 5:
+            trend_msg = "**North-South** traffic is currently dominating the intersection."
+        elif ew_count > ns_count + 5:
+            trend_msg = "**East-West** traffic is currently dominating the intersection."
+        else:
+            trend_msg = "Traffic flow is currently **balanced**."
+            
+        st.info(trend_msg)
+        
+        df_vol = pd.DataFrame({
+            "Time": list(st.session_state.history_time),
+            "North-South": list(st.session_state.history_ns),
+            "East-West": list(st.session_state.history_ew)
+        }).set_index("Time")
+        
+        st.line_chart(df_vol, height=200)
 
-    df_eff = pd.DataFrame({
-        "Direction": ["North-South", "East-West"],
-        "Green Time (sec)": [signal_plan["green_ns"], signal_plan["green_ew"]]
-    }).set_index("Direction")
-    efficiency_chart.bar_chart(df_eff, height=250)
+    with efficiency_container.container():
+        st.markdown("### Recommended Time")
+        ec1, ec2 = st.columns(2)
+        ec1.metric("North-South", f"{signal_plan['green_ns']} sec", f"{ns_count} vehicles waiting", delta_color="off")
+        ec2.metric("East-West", f"{signal_plan['green_ew']} sec", f"{ew_count} vehicles waiting", delta_color="off")
+        
+        total_time = signal_plan['green_ns'] + signal_plan['green_ew']
+        if total_time > 0:
+            ns_pct = signal_plan['green_ns'] / total_time
+            ew_pct = signal_plan['green_ew'] / total_time
+            st.markdown(f"**North-South Priority ({int(ns_pct*100)}%)**")
+            st.progress(float(ns_pct))
+            st.markdown(f"**East-West Priority ({int(ew_pct*100)}%)**")
+            st.progress(float(ew_pct))
 
     # 🗺️ UPDATE MAP — Dijkstra + OSRM on 25 CCTVs, Bandra West
     current_map_state = f"{ns_count}_{ew_count}_{source_idx}_{dest_idx}_{active_cam_idx}"
@@ -322,18 +354,18 @@ while cap.running:
             # Color Logic based on TOTAL volume (Congestion Level)
             if score > 15:
                 color = [220, 40, 40, 240]   # Red
-                status = f"🔴 Heavy Traffic ({score} vehicles)"
+                status = f"Heavy Traffic ({score} vehicles)"
             elif score > 8:
                 color = [255, 200, 40, 240]  # Yellow
-                status = f"🟡 Moderate Traffic ({score} vehicles)"
+                status = f"Moderate Traffic ({score} vehicles)"
             else:
                 color = [40, 200, 40, 240]   # Green
-                status = f"🟢 Clear Traffic ({score} vehicles)"
+                status = f"Clear Traffic ({score} vehicles)"
 
             cctv_rows.append({
                 "lat": cam["lat"], "lon": cam["lon"],
                 "color": color, "radius": 12,
-                "label": f"📹 {cam['id']} — {cam['name']}\n{status}"
+                "label": f"{cam['id']} — {cam['name']}\n{status}"
             })
 
         # --- Step 2: Dijkstra — least-congested path from user-selected Source to Destination ---
@@ -367,7 +399,7 @@ while cap.running:
         # Mark cameras ON the Dijkstra path with a larger white ring
         dijk_ids = {CCTV_POINTS[i]["id"] for i in last_dijkstra_path}
         cctv_df["on_path"] = cctv_df.apply(
-            lambda r: 18 if any(r["label"].startswith(f"📹 {d}") for d in dijk_ids) else 12,
+            lambda r: 18 if any(r["label"].startswith(f"{d}") for d in dijk_ids) else 12,
             axis=1
         )
 
