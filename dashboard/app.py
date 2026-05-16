@@ -145,6 +145,49 @@ active_cam = CCTV_POINTS[active_cam_idx]
 source_idx = cam_names.index(source_cam_name)
 dest_idx = cam_names.index(dest_cam_name)
 
+# --- MANUAL TRAFFIC OVERRIDE (collapsible sidebar section) ---
+st.sidebar.markdown("---")
+with st.sidebar.expander("🚦 Manual Traffic Control", expanded=False):
+    st.caption("Override congestion at any crossing. Set to 0 to use auto-simulation.")
+
+    # Global multiplier for quick adjustment
+    global_boost = st.slider("Global traffic multiplier", 0.0, 3.0, 1.0, 0.1,
+                             help="Multiply ALL crossing traffic by this factor")
+
+    # Persist overrides across reruns
+    if 'traffic_overrides' not in st.session_state:
+        st.session_state.traffic_overrides = {}
+
+    # Group cameras by zone prefix for cleaner UI
+    zone_labels = {
+        "BBS": "🏙️ Bhubaneswar",
+        "NH16": "🛣️ NH16 (BBS→CTC)",
+        "CTC": "🏛️ Cuttack",
+        "SOU": "⬇️ Khordha/Jatni",
+        "NH316": "🛤️ NH316 (BBS→Puri)",
+        "PURI": "🕌 Puri",
+        "KNK": "☀️ Konark",
+    }
+
+    for prefix, label in zone_labels.items():
+        zone_cams = [(i, c) for i, c in enumerate(CCTV_POINTS) if c["id"].startswith(prefix)]
+        if not zone_cams:
+            continue
+        st.markdown(f"**{label}**")
+        for i, cam in zone_cams:
+            key = f"tov_{i}"
+            default = st.session_state.traffic_overrides.get(i, 0)
+            val = st.slider(
+                cam['name'], 0, 60, default, 1, key=key,
+                help=f"Total vehicles at {cam['name']}. 0 = auto."
+            )
+            st.session_state.traffic_overrides[i] = val
+
+# Retrieve overrides and global boost for use in main loop
+traffic_overrides = st.session_state.get('traffic_overrides', {})
+if 'global_boost' not in dir():
+    global_boost = 1.0
+
 # --- VIDEO SETUP ---
 video_path = os.path.join(os.path.dirname(__file__), "..", "data", active_cam["video"])
 
@@ -315,160 +358,170 @@ while cap.running:
             st.progress(float(ew_pct))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # 🗺️ UPDATE MAP — OSRM real-road routing + CCTV-based time estimation
+    # 🗺️ UPDATE MAP — OSRM routing + live CCTV-based re-ranking every frame
     # ═══════════════════════════════════════════════════════════════════════════
-    current_map_state = f"{ns_count}_{ew_count}_{source_idx}_{dest_idx}_{active_cam_idx}"
 
-    if current_map_state != last_map_state:
-        last_map_state = current_map_state
+    # --- Step 1: ALWAYS update per-camera congestion scores (they drift) ---
+    cam_scores = {}
+    cctv_rows = []
 
-        # --- Step 1: Generate per-camera congestion scores ---
-        cam_scores = {}
-        cctv_rows = []
+    for i, cam in enumerate(CCTV_POINTS):
+        override = traffic_overrides.get(i, 0)
+        if override > 0:
+            cam_ns = override // 2
+            cam_ew = override - cam_ns
+        elif i == active_cam_idx:
+            cam_ns = ns_count
+            cam_ew = ew_count
+        else:
+            city_traffic[i]["ns"] = max(0, min(30, city_traffic[i]["ns"] + random.choice([-3, -2, -1, 0, 0, 1, 2, 3])))
+            city_traffic[i]["ew"] = max(0, min(30, city_traffic[i]["ew"] + random.choice([-3, -2, -1, 0, 0, 1, 2, 3])))
+            cam_ns = city_traffic[i]["ns"]
+            cam_ew = city_traffic[i]["ew"]
 
-        for i, cam in enumerate(CCTV_POINTS):
-            if i == active_cam_idx:
-                cam_ns = ns_count
-                cam_ew = ew_count
-            else:
-                city_traffic[i]["ns"] = max(0, min(30, city_traffic[i]["ns"] + random.choice([-3, -2, -1, 0, 0, 1, 2, 3])))
-                city_traffic[i]["ew"] = max(0, min(30, city_traffic[i]["ew"] + random.choice([-3, -2, -1, 0, 0, 1, 2, 3])))
-                cam_ns = city_traffic[i]["ns"]
-                cam_ew = city_traffic[i]["ew"]
+        score = int((cam_ns + cam_ew) * global_boost)
+        cam_scores[i] = max(score, 0.1)
 
-            score = cam_ns + cam_ew
-            cam_scores[i] = max(score, 0.1)
+        if score > 15:
+            color = [220, 40, 40, 240]
+            status = f"Heavy ({score} veh) ~{score * WAIT_PER_VEHICLE_SEC:.0f}s wait"
+        elif score > 8:
+            color = [255, 200, 40, 240]
+            status = f"Moderate ({score} veh) ~{score * WAIT_PER_VEHICLE_SEC:.0f}s wait"
+        else:
+            color = [40, 200, 40, 240]
+            status = f"Clear ({score} veh)"
 
-            if score > 15:
-                color = [220, 40, 40, 240]   # Red
-                status = f"Heavy ({score} veh) ~{score * WAIT_PER_VEHICLE_SEC:.0f}s wait"
-            elif score > 8:
-                color = [255, 200, 40, 240]  # Yellow
-                status = f"Moderate ({score} veh) ~{score * WAIT_PER_VEHICLE_SEC:.0f}s wait"
-            else:
-                color = [40, 200, 40, 240]   # Green
-                status = f"Clear ({score} veh)"
+        cctv_rows.append({
+            "lat": cam["lat"], "lon": cam["lon"],
+            "color": color, "radius": 12,
+            "name": f"{cam['id']} — {cam['name']}\n{status}"
+        })
 
-            cctv_rows.append({
-                "lat": cam["lat"], "lon": cam["lon"],
-                "color": color, "radius": 12,
-                "name": f"{cam['id']} — {cam['name']}\n{status}"
-            })
-
-        # --- Step 2: Get OSRM real-road routes (up to 3 alternatives) ---
+    # --- Step 2: Fetch OSRM routes ONLY when source/dest changes (expensive) ---
+    route_key = f"{source_idx}_{dest_idx}"
+    if route_key != last_map_state:
+        last_map_state = route_key
         src = CCTV_POINTS[source_idx]
         dst = CCTV_POINTS[dest_idx]
-        osrm_routes = get_osrm_alternatives(src["lat"], src["lon"], dst["lat"], dst["lon"])
+        cached_osrm = get_osrm_alternatives(src["lat"], src["lon"], dst["lat"], dst["lon"])
+        # Pre-compute nearby CCTVs per route (geometry doesn't change)
+        cached_nearby = []
+        for route in cached_osrm:
+            cached_nearby.append(find_nearby_cctvs(route["coords"], CCTV_POINTS))
+        st.session_state['cached_osrm'] = cached_osrm
+        st.session_state['cached_nearby'] = cached_nearby
 
-        # --- Step 3: Score each route — drive time + CCTV wait times ---
-        scored_routes = []
-        for route in osrm_routes:
-            nearby = find_nearby_cctvs(route["coords"], CCTV_POINTS)
-            total_min, drive_min, wait_min = estimate_route_time(
-                route["distance_km"], nearby, cam_scores
-            )
-            scored_routes.append({
-                "geometry": route["geometry"],
-                "distance_km": route["distance_km"],
-                "total_min": total_min,
-                "drive_min": drive_min,
-                "wait_min": wait_min,
-                "num_cctvs": len(nearby),
-                "nearby_cctvs": nearby,
-            })
+    osrm_routes = st.session_state.get('cached_osrm', [])
+    nearby_per_route = st.session_state.get('cached_nearby', [])
 
-        # Sort by total estimated time (lowest = best)
-        scored_routes.sort(key=lambda r: r["total_min"])
-        last_scored_routes = scored_routes
-
-        # --- Step 4: Build map layers ---
-        cctv_df = pd.DataFrame(cctv_rows)
-
-        # Highlight CCTVs that are near any of the routes
-        all_route_cctvs = set()
-        for sr in scored_routes:
-            all_route_cctvs.update(sr["nearby_cctvs"])
-        on_route_ids = {CCTV_POINTS[ci]["id"] for ci in all_route_cctvs}
-        cctv_df["on_path"] = cctv_df.apply(
-            lambda r: 18 if any(r["name"].startswith(d) for d in on_route_ids) else 12,
-            axis=1
+    # --- Step 3: ALWAYS re-score routes against CURRENT congestion ---
+    scored_routes = []
+    for idx, route in enumerate(osrm_routes):
+        nearby = nearby_per_route[idx] if idx < len(nearby_per_route) else []
+        total_min, drive_min, wait_min = estimate_route_time(
+            route["distance_km"], nearby, cam_scores
         )
+        scored_routes.append({
+            "geometry": route["geometry"],
+            "distance_km": route["distance_km"],
+            "total_min": total_min,
+            "drive_min": drive_min,
+            "wait_min": wait_min,
+            "num_cctvs": len(nearby),
+            "nearby_cctvs": nearby,
+        })
 
-        cctv_layer = pdk.Layer(
-            "ScatterplotLayer",
-            cctv_df,
-            get_position=["lon", "lat"],
-            get_fill_color="color",
-            get_line_color=[255, 255, 255, 255],
-            get_radius="on_path",
-            stroked=True,
-            line_width_min_pixels=2,
-            pickable=True,
-            auto_highlight=True
+    # Sort by total estimated time — best route first
+    scored_routes.sort(key=lambda r: r["total_min"])
+
+    # --- Step 4: Build map layers ---
+    cctv_df = pd.DataFrame(cctv_rows)
+
+    all_route_cctvs = set()
+    for sr in scored_routes:
+        all_route_cctvs.update(sr["nearby_cctvs"])
+    on_route_ids = {CCTV_POINTS[ci]["id"] for ci in all_route_cctvs}
+    cctv_df["on_path"] = cctv_df.apply(
+        lambda r: 18 if any(r["name"].startswith(d) for d in on_route_ids) else 12,
+        axis=1
+    )
+
+    cctv_layer = pdk.Layer(
+        "ScatterplotLayer",
+        cctv_df,
+        get_position=["lon", "lat"],
+        get_fill_color="color",
+        get_line_color=[255, 255, 255, 255],
+        get_radius="on_path",
+        stroked=True,
+        line_width_min_pixels=2,
+        pickable=True,
+        auto_highlight=True
+    )
+
+    # Color-coded routes: best=green, 2nd=yellow, 3rd=orange
+    route_colors = [
+        [0, 230, 118, 240],
+        [255, 214, 10, 200],
+        [255, 145, 77, 180],
+    ]
+    route_widths = [5, 3, 2]
+    route_layer_data = []
+    for idx, sr in enumerate(scored_routes):
+        rank = "⭐ FASTEST" if idx == 0 else f"Alt {idx}"
+        label = (
+            f"{rank} | {sr['distance_km']:.1f}km | "
+            f"Drive {sr['drive_min']:.1f}min + "
+            f"Wait {sr['wait_min']:.1f}min = "
+            f"TOTAL {sr['total_min']:.1f}min | "
+            f"{sr['num_cctvs']} CCTVs"
         )
+        route_layer_data.append({
+            "path": sr["geometry"],
+            "color": route_colors[idx % len(route_colors)],
+            "width": route_widths[idx % len(route_widths)],
+            "name": label,
+        })
 
-        # Color-coded routes: best=green, 2nd=yellow, 3rd=orange
-        route_colors = [
-            [0, 230, 118, 240],    # Green — fastest
-            [255, 214, 10, 200],   # Yellow — alternative 1
-            [255, 145, 77, 180],   # Orange — alternative 2
-        ]
-        route_widths = [5, 3, 2]
-        route_layer_data = []
-        for idx, sr in enumerate(scored_routes):
-            label = (
-                f"Route {idx+1}: {sr['distance_km']:.1f}km | "
-                f"Drive {sr['drive_min']:.1f}min | "
-                f"Wait {sr['wait_min']:.1f}min | "
-                f"TOTAL {sr['total_min']:.1f}min | "
-                f"{sr['num_cctvs']} CCTVs on route"
-            )
-            route_layer_data.append({
-                "path": sr["geometry"],
-                "color": route_colors[idx % len(route_colors)],
-                "width": route_widths[idx % len(route_widths)],
-                "name": label,
-            })
+    path_layer = pdk.Layer(
+        "PathLayer",
+        route_layer_data,
+        width_min_pixels=2,
+        get_width="width",
+        width_scale=1,
+        get_path="path",
+        get_color="color",
+        pickable=True
+    )
 
-        path_layer = pdk.Layer(
-            "PathLayer",
-            route_layer_data,
-            width_min_pixels=2,
-            get_width="width",
-            width_scale=1,
-            get_path="path",
-            get_color="color",
-            pickable=True
-        )
+    # Centre map on midpoint between source and destination
+    src = CCTV_POINTS[source_idx]
+    dst = CCTV_POINTS[dest_idx]
+    mid_lat = (src["lat"] + dst["lat"]) / 2
+    mid_lon = (src["lon"] + dst["lon"]) / 2
+    span = haversine_km(src["lat"], src["lon"], dst["lat"], dst["lon"])
+    if span > 80:
+        zoom = 9.0
+    elif span > 40:
+        zoom = 9.5
+    elif span > 15:
+        zoom = 10.5
+    elif span > 5:
+        zoom = 11.5
+    else:
+        zoom = 12.5
 
-        # Centre map on midpoint between source and destination
-        mid_lat = (src["lat"] + dst["lat"]) / 2
-        mid_lon = (src["lon"] + dst["lon"]) / 2
-        span = haversine_km(src["lat"], src["lon"], dst["lat"], dst["lon"])
-        # Auto-zoom based on route distance
-        if span > 80:
-            zoom = 9.0
-        elif span > 40:
-            zoom = 9.5
-        elif span > 15:
-            zoom = 10.5
-        elif span > 5:
-            zoom = 11.5
-        else:
-            zoom = 12.5
+    view_state = pdk.ViewState(
+        latitude=mid_lat, longitude=mid_lon,
+        zoom=zoom, pitch=40
+    )
 
-        view_state = pdk.ViewState(
-            latitude=mid_lat,
-            longitude=mid_lon,
-            zoom=zoom,
-            pitch=40
-        )
-
-        map_feed.pydeck_chart(pdk.Deck(
-            layers=[path_layer, cctv_layer],
-            initial_view_state=view_state,
-            tooltip={"text": "{name}"}
-        ))
+    map_feed.pydeck_chart(pdk.Deck(
+        layers=[path_layer, cctv_layer],
+        initial_view_state=view_state,
+        tooltip={"text": "{name}"}
+    ))
 
     time.sleep(0.00001)
 
