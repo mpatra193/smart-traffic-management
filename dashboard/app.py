@@ -14,8 +14,6 @@ from models.traffic_ai import get_signal_timing
 from mock_data.simulator import is_emergency_vehicle
 import importlib
 
-import detector.detector
-importlib.reload(detector.detector)
 from detector.detector import detect_vehicles_in_frame, detect_vehicles_by_zone
 
 import utils.stream_handler
@@ -25,7 +23,6 @@ import pandas as pd
 import pydeck as pdk
 import requests
 import polyline
-import networkx as nx
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Traffic Route Optimizer", layout="wide")
@@ -44,8 +41,6 @@ st.title("Traffic Route Optimizer")
 # --- LANGUAGE ---
 lang = st.sidebar.selectbox("Select Language", ["English", "Hindi", "Tamil"])
 
-# Language selector already defined above this chunk
-
 def translate_text(text, target_lang):
     if target_lang == "English":
         return text
@@ -57,93 +52,88 @@ def translate_text(text, target_lang):
 
 import heapq
 import random
+import math
+
+# ─── ROUTING CONSTANTS ──────────────────────────────────────────────────────────
+AVERAGE_SPEED_KPH = 60.0          # assumed avg vehicle speed
+CCTV_PROXIMITY_KM = 0.5           # how close a CCTV must be to "see" a route
+WAIT_PER_VEHICLE_SEC = 2.5        # estimated wait per queued vehicle at intersection
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two lat/lon points in km."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(dlon / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def get_osrm_route(waypoints):
-    """Fetches actual road geometry through waypoints from OSRM.
-    waypoints: list of (lat, lon) tuples.
-    Returns list of [lon, lat] for PyDeck PathLayer.
+def get_osrm_alternatives(src_lat, src_lon, dst_lat, dst_lon):
+    """Ask OSRM for up to 3 real-road alternative routes.
+    Routes follow ACTUAL roads — no dependency on our camera graph.
     """
-    coord_str = ";".join(f"{lon},{lat}" for lat, lon in waypoints)
-    url = f"http://router.project-osrm.org/route/v1/driving/{coord_str}?overview=full&geometries=polyline"
+    url = (
+        f"http://router.project-osrm.org/route/v1/driving/"
+        f"{src_lon},{src_lat};{dst_lon},{dst_lat}"
+        f"?overview=full&geometries=polyline&alternatives=3"
+    )
     try:
-        r = requests.get(url, timeout=6)
+        r = requests.get(url, timeout=10)
         data = r.json()
-        if data.get('code') == 'Ok':
-            decoded = polyline.decode(data['routes'][0]['geometry'])
-            return [[p[1], p[0]] for p in decoded]
+        if data.get('code') != 'Ok':
+            return []
+        results = []
+        for route in data['routes']:
+            decoded = polyline.decode(route['geometry'])
+            results.append({
+                "geometry": [[p[1], p[0]] for p in decoded],  # [lon,lat] for PyDeck
+                "coords": decoded,                              # [(lat,lon)] for matching
+                "distance_km": route['distance'] / 1000.0,
+                "duration_min": route['duration'] / 60.0,
+            })
+        return results
     except Exception:
-        pass
-    return None
+        return []
 
-def dijkstra(graph, weights, source, target):
+def find_nearby_cctvs(route_coords, cctv_points, radius_km=CCTV_PROXIMITY_KM):
+    """Find which CCTVs sit within radius_km of any point on the route.
+    Samples every 5th polyline point for speed.
     """
-    (Deprecated - Now using networkx in main loop)
+    nearby = set()
+    sampled = route_coords[::5] if len(route_coords) > 10 else route_coords
+    for ci, cam in enumerate(cctv_points):
+        clat, clon = cam["lat"], cam["lon"]
+        for rlat, rlon in sampled:
+            if haversine_km(rlat, rlon, clat, clon) <= radius_km:
+                nearby.add(ci)
+                break
+    return sorted(nearby)
+
+def estimate_route_time(route_distance_km, nearby_cctv_indices, cam_scores):
+    """Total estimated travel time in minutes.
+    = drive_time (distance ÷ 60 kph) + wait times at congested CCTV intersections.
     """
-    pass
+    drive_time_min = (route_distance_km / AVERAGE_SPEED_KPH) * 60.0
+    total_wait_sec = 0.0
+    for ci in nearby_cctv_indices:
+        vehicles = cam_scores.get(ci, 0)
+        total_wait_sec += vehicles * WAIT_PER_VEHICLE_SEC
+    total_wait_min = total_wait_sec / 60.0
+    return drive_time_min + total_wait_min, drive_time_min, total_wait_min
 
-# ─── 25 CCTV cameras forming a dense grid in Bhubaneswar, Odisha ───────────────
-CCTV_POINTS = [
-    # Row 0: Lat 20.26 (South)
-    {"id": "CAM-01", "name": "Khandagiri Square",       "lat": 20.2589, "lon": 85.7831, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-02", "name": "Ganga Nagar",             "lat": 20.2590, "lon": 85.8120, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-03", "name": "AG Square",               "lat": 20.2625, "lon": 85.8318, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-04", "name": "Raj Mahal Square",        "lat": 20.2625, "lon": 85.8385, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-05", "name": "Kalpana Square",          "lat": 20.2543, "lon": 85.8432, "video": "intersection.mp4", "type": "4-way"},
-
-    # Row 1: Lat 20.27
-    {"id": "CAM-06", "name": "Fire Station Square",     "lat": 20.2721, "lon": 85.7981, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-07", "name": "Siripur Square",          "lat": 20.2730, "lon": 85.8100, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-08", "name": "Unit 4 Market",           "lat": 20.2730, "lon": 85.8250, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-09", "name": "Master Canteen",          "lat": 20.2666, "lon": 85.8436, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-10", "name": "Cuttack Road South",      "lat": 20.2710, "lon": 85.8450, "video": "intersection.mp4", "type": "2-way"},
-
-    # Row 2: Lat 20.28
-    {"id": "CAM-11", "name": "CRP Square",              "lat": 20.2853, "lon": 85.8080, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-12", "name": "Nayapalli",               "lat": 20.2850, "lon": 85.8150, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-13", "name": "Shastri Nagar",           "lat": 20.2850, "lon": 85.8250, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-14", "name": "Ram Mandir Square",       "lat": 20.2766, "lon": 85.8415, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-15", "name": "Bomikhal",                "lat": 20.2844, "lon": 85.8465, "video": "intersection.mp4", "type": "2-way"},
-
-    # Row 3: Lat 20.29
-    {"id": "CAM-16", "name": "Rental Colony",           "lat": 20.2910, "lon": 85.8050, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-17", "name": "IRC Village",             "lat": 20.2910, "lon": 85.8120, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-18", "name": "Acharya Vihar",           "lat": 20.2965, "lon": 85.8245, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-19", "name": "Rupali Square",           "lat": 20.2882, "lon": 85.8368, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-20", "name": "VSS Nagar",               "lat": 20.2910, "lon": 85.8450, "video": "intersection.mp4", "type": "2-way"},
-
-    # Row 4: Lat 20.30
-    {"id": "CAM-21", "name": "Baramunda",               "lat": 20.2711, "lon": 85.7932, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-22", "name": "Jayadev Vihar Square",    "lat": 20.3013, "lon": 85.8175, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-23", "name": "Sainik School",           "lat": 20.3010, "lon": 85.8250, "video": "intersection.mp4", "type": "2-way"},
-    {"id": "CAM-24", "name": "Vani Vihar",              "lat": 20.2942, "lon": 85.8340, "video": "intersection.mp4", "type": "4-way"},
-    {"id": "CAM-25", "name": "Rasulgarh Square",        "lat": 20.2982, "lon": 85.8491, "video": "intersection.mp4", "type": "4-way"},
-]
-
-# Road graph: which cameras are connected by direct roads
-# (index-based, 0 = CAM-01 ... 24 = CAM-25)
-ROAD_GRAPH = {
-    0: [1, 20], 1: [0, 2, 10, 12], 2: [1, 3, 5], 3: [2, 4, 14], 4: [3, 7],
-    5: [2, 6, 12], 6: [5, 7, 13], 7: [6, 8], 8: [7, 9], 9: [8, 19],
-    10: [1, 11], 11: [10, 15], 12: [1, 5], 13: [6, 14], 14: [3, 13, 15],
-    15: [11, 14, 16], 16: [15, 17], 17: [16, 18], 18: [17, 19], 19: [9, 18],
-    20: [0, 21], 21: [20, 22], 22: [21, 23], 23: [22, 24], 24: [23]
-}
-
-# Pre-build NetworkX graph
-G_ROAD = nx.Graph()
-for node, neighbors in ROAD_GRAPH.items():
-    for neighbor in neighbors:
-        G_ROAD.add_edge(node, neighbor)
+# ─── 75 CCTV cameras covering all crossings within 100km ───────────────────────
+from data.camera_network import CCTV_POINTS
 
 # --- ROUTING & CAMERA CONTROLS ---
 st.sidebar.markdown("---")
 cam_names = [cam["name"] for cam in CCTV_POINTS]
 active_cam_name = st.sidebar.selectbox("View Live Feed From:", cam_names, index=5)
 st.sidebar.markdown("---")
-st.sidebar.subheader("Emergency Routing")
+st.sidebar.subheader("Route Planning")
 source_cam_name = st.sidebar.selectbox("From (Source)", cam_names, index=0)
-dest_cam_name = st.sidebar.selectbox("To (Destination)", cam_names, index=24)
+dest_cam_name = st.sidebar.selectbox("To (Destination)", cam_names, index=min(24, len(cam_names)-1))
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Stream Source (Tier 1)")
@@ -201,7 +191,7 @@ with feed_col1:
     emerg_alert = st.empty()
 
 with feed_col2:
-    st.subheader(translate_text("Bhubaneswar Map & Routing", lang))
+    st.subheader(translate_text("Odisha 100km Network & Routing", lang))
     map_feed = st.empty()
 
 st.markdown("---")
@@ -221,12 +211,10 @@ with chart_col2:
 frame_skip = 5
 frame_count = 0
 last_map_state = None
-last_dijkstra_path = []
-last_osrm_route = []
+last_scored_routes = []  # cached OSRM routes with time estimates
 
 # --- Initialize City Traffic State ---
-# This gives each camera its own independent traffic level that drifts over time
-city_traffic = [{"ns": random.randint(2, 12), "ew": random.randint(2, 12)} for _ in range(25)]
+city_traffic = [{"ns": random.randint(0, 20), "ew": random.randint(0, 20)} for _ in range(len(CCTV_POINTS))]
 
 # --- MAIN LOOP ---
 while cap.running:
@@ -326,80 +314,83 @@ while cap.running:
             st.markdown(f"**East-West Priority ({int(ew_pct*100)}%)**")
             st.progress(float(ew_pct))
 
-    # 🗺️ UPDATE MAP — Dijkstra + OSRM on 25 CCTVs, Bandra West
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 🗺️ UPDATE MAP — OSRM real-road routing + CCTV-based time estimation
+    # ═══════════════════════════════════════════════════════════════════════════
     current_map_state = f"{ns_count}_{ew_count}_{source_idx}_{dest_idx}_{active_cam_idx}"
 
     if current_map_state != last_map_state:
         last_map_state = current_map_state
 
         # --- Step 1: Generate per-camera congestion scores ---
-        cam_scores = {}   # node_index -> total vehicles seen
+        cam_scores = {}
         cctv_rows = []
 
         for i, cam in enumerate(CCTV_POINTS):
             if i == active_cam_idx:
-                # Active camera gets EXACT counts from the live video feed
                 cam_ns = ns_count
                 cam_ew = ew_count
             else:
-                # Other cameras get a random walk to simulate independent city traffic
-                city_traffic[i]["ns"] = max(1, city_traffic[i]["ns"] + random.choice([-1, 0, 1]))
-                city_traffic[i]["ew"] = max(1, city_traffic[i]["ew"] + random.choice([-1, 0, 1]))
+                city_traffic[i]["ns"] = max(0, min(30, city_traffic[i]["ns"] + random.choice([-3, -2, -1, 0, 0, 1, 2, 3])))
+                city_traffic[i]["ew"] = max(0, min(30, city_traffic[i]["ew"] + random.choice([-3, -2, -1, 0, 0, 1, 2, 3])))
                 cam_ns = city_traffic[i]["ns"]
                 cam_ew = city_traffic[i]["ew"]
 
-            score = cam_ns + cam_ew          # total traffic = Dijkstra cost
+            score = cam_ns + cam_ew
             cam_scores[i] = max(score, 0.1)
 
-            # Color Logic based on TOTAL volume (Congestion Level)
             if score > 15:
                 color = [220, 40, 40, 240]   # Red
-                status = f"Heavy Traffic ({score} vehicles)"
+                status = f"Heavy ({score} veh) ~{score * WAIT_PER_VEHICLE_SEC:.0f}s wait"
             elif score > 8:
                 color = [255, 200, 40, 240]  # Yellow
-                status = f"Moderate Traffic ({score} vehicles)"
+                status = f"Moderate ({score} veh) ~{score * WAIT_PER_VEHICLE_SEC:.0f}s wait"
             else:
                 color = [40, 200, 40, 240]   # Green
-                status = f"Clear Traffic ({score} vehicles)"
+                status = f"Clear ({score} veh)"
 
             cctv_rows.append({
                 "lat": cam["lat"], "lon": cam["lon"],
                 "color": color, "radius": 12,
-                "label": f"{cam['id']} — {cam['name']}\n{status}"
+                "name": f"{cam['id']} — {cam['name']}\n{status}"
             })
 
-        # --- Step 2: Dijkstra — least-congested path from user-selected Source to Destination ---
-        # Update edge weights in NetworkX graph
-        for u, v in G_ROAD.edges():
-            w_u = cam_scores.get(u, 1)
-            w_v = cam_scores.get(v, 1)
-            
-            # Exponential penalty to aggressively avoid red nodes (heavy traffic)
-            cost_u = w_u * 10 if w_u > 15 else w_u
-            cost_v = w_v * 10 if w_v > 15 else w_v
-            
-            G_ROAD[u][v]['weight'] = 1.0 + ((cost_u + cost_v) / 2)
-            
-        try:
-            dijk_path = nx.shortest_path(G_ROAD, source=source_idx, target=dest_idx, weight='weight')
-        except nx.NetworkXNoPath:
-            dijk_path = []
+        # --- Step 2: Get OSRM real-road routes (up to 3 alternatives) ---
+        src = CCTV_POINTS[source_idx]
+        dst = CCTV_POINTS[dest_idx]
+        osrm_routes = get_osrm_alternatives(src["lat"], src["lon"], dst["lat"], dst["lon"])
 
-        # --- Step 3: If path changed, call OSRM for real road geometry ---
-        if dijk_path and dijk_path != last_dijkstra_path:
-            last_dijkstra_path = dijk_path
-            # Convert to tuple of tuples so it's hashable for st.cache_data
-            waypoints = tuple((CCTV_POINTS[i]["lat"], CCTV_POINTS[i]["lon"]) for i in dijk_path)
-            osrm_path = get_osrm_route(waypoints)
-            last_osrm_route = osrm_path if osrm_path else []
+        # --- Step 3: Score each route — drive time + CCTV wait times ---
+        scored_routes = []
+        for route in osrm_routes:
+            nearby = find_nearby_cctvs(route["coords"], CCTV_POINTS)
+            total_min, drive_min, wait_min = estimate_route_time(
+                route["distance_km"], nearby, cam_scores
+            )
+            scored_routes.append({
+                "geometry": route["geometry"],
+                "distance_km": route["distance_km"],
+                "total_min": total_min,
+                "drive_min": drive_min,
+                "wait_min": wait_min,
+                "num_cctvs": len(nearby),
+                "nearby_cctvs": nearby,
+            })
 
-        # --- Step 4: Build layers ---
+        # Sort by total estimated time (lowest = best)
+        scored_routes.sort(key=lambda r: r["total_min"])
+        last_scored_routes = scored_routes
+
+        # --- Step 4: Build map layers ---
         cctv_df = pd.DataFrame(cctv_rows)
 
-        # Mark cameras ON the Dijkstra path with a larger white ring
-        dijk_ids = {CCTV_POINTS[i]["id"] for i in last_dijkstra_path}
+        # Highlight CCTVs that are near any of the routes
+        all_route_cctvs = set()
+        for sr in scored_routes:
+            all_route_cctvs.update(sr["nearby_cctvs"])
+        on_route_ids = {CCTV_POINTS[ci]["id"] for ci in all_route_cctvs}
         cctv_df["on_path"] = cctv_df.apply(
-            lambda r: 18 if any(r["label"].startswith(f"{d}") for d in dijk_ids) else 12,
+            lambda r: 18 if any(r["name"].startswith(d) for d in on_route_ids) else 12,
             axis=1
         )
 
@@ -416,33 +407,67 @@ while cap.running:
             auto_highlight=True
         )
 
-        # White Dijkstra shortest path (via OSRM road geometry)
+        # Color-coded routes: best=green, 2nd=yellow, 3rd=orange
+        route_colors = [
+            [0, 230, 118, 240],    # Green — fastest
+            [255, 214, 10, 200],   # Yellow — alternative 1
+            [255, 145, 77, 180],   # Orange — alternative 2
+        ]
+        route_widths = [5, 3, 2]
         route_layer_data = []
-        if last_osrm_route:
-            route_layer_data = [{"path": last_osrm_route, "color": [255, 255, 255, 230]}]
+        for idx, sr in enumerate(scored_routes):
+            label = (
+                f"Route {idx+1}: {sr['distance_km']:.1f}km | "
+                f"Drive {sr['drive_min']:.1f}min | "
+                f"Wait {sr['wait_min']:.1f}min | "
+                f"TOTAL {sr['total_min']:.1f}min | "
+                f"{sr['num_cctvs']} CCTVs on route"
+            )
+            route_layer_data.append({
+                "path": sr["geometry"],
+                "color": route_colors[idx % len(route_colors)],
+                "width": route_widths[idx % len(route_widths)],
+                "name": label,
+            })
 
         path_layer = pdk.Layer(
             "PathLayer",
             route_layer_data,
-            width_min_pixels=4,
+            width_min_pixels=2,
+            get_width="width",
+            width_scale=1,
             get_path="path",
             get_color="color",
-            pickable=False
+            pickable=True
         )
 
-        # Centre map on Jayadev Vihar (Row 4, Col 1 roughly middle)
-        mid = CCTV_POINTS[21]  # Jayadev Vihar Square
+        # Centre map on midpoint between source and destination
+        mid_lat = (src["lat"] + dst["lat"]) / 2
+        mid_lon = (src["lon"] + dst["lon"]) / 2
+        span = haversine_km(src["lat"], src["lon"], dst["lat"], dst["lon"])
+        # Auto-zoom based on route distance
+        if span > 80:
+            zoom = 9.0
+        elif span > 40:
+            zoom = 9.5
+        elif span > 15:
+            zoom = 10.5
+        elif span > 5:
+            zoom = 11.5
+        else:
+            zoom = 12.5
+
         view_state = pdk.ViewState(
-            latitude=mid["lat"],
-            longitude=mid["lon"],
-            zoom=12.5,
-            pitch=45
+            latitude=mid_lat,
+            longitude=mid_lon,
+            zoom=zoom,
+            pitch=40
         )
 
         map_feed.pydeck_chart(pdk.Deck(
             layers=[path_layer, cctv_layer],
             initial_view_state=view_state,
-            tooltip={"text": "{label}"}
+            tooltip={"text": "{name}"}
         ))
 
     time.sleep(0.00001)
