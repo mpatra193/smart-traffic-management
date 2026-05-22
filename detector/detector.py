@@ -1,29 +1,48 @@
 # detector/detector.py
 import torch
 from ultralytics import YOLO
+import os
 
 # Load model ONCE (not per frame)
-model = YOLO('yolo11n.pt')  # or yolov8s.pt / yolo11s.pt for better accuracy
+# Use yolov8n.pt from this directory, or fall back to download
+_model_dir = os.path.dirname(os.path.abspath(__file__))
+_model_candidates = [
+    os.path.join(_model_dir, 'yolov8n.pt'),
+    'yolov8n.pt',
+    'yolov8n',  # triggers fresh download
+]
+
+model = None
+for _mp in _model_candidates:
+    try:
+        model = YOLO(_mp)
+        # Force a fuse test to catch incompatible weights early
+        _ = model.model
+        break
+    except Exception as e:
+        print(f"Could not load {_mp}: {e}")
+        model = None
+
+if model is None:
+    raise RuntimeError("No compatible YOLO model found")
+
 VEHICLE_CLASSES = [2, 3, 5, 7]  # car, motorcycle, bus, truck
 
 # Check GPU availability
 if torch.cuda.is_available():
     device = "cuda"
-elif torch.backends.mps.is_available():
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     device = "mps"
 else:
     device = "cpu"
-    
+
 print(f"Using device for YOLO: {device}")
-model.to(device)
 
 def detect_vehicles_in_frame(frame):
     """
     Returns total vehicle count in frame.
     """
-    # imgsz=640 speeds up inference by ensuring standard sizing, half=True uses FP16 on GPU
-    half_precision = device != "cpu"
-    results = model(frame, verbose=False, device=device, imgsz=640, half=half_precision)
+    results = model.predict(frame, verbose=False, device=device, imgsz=640)
     count = 0
     for result in results:
         for cls in result.boxes.cls:
@@ -40,8 +59,7 @@ def detect_vehicles_by_zone(frame, crossing_type="2-way"):
     h, w = frame.shape[:2]
     counts = {"left": 0, "right": 0}
 
-    half_precision = device != "cpu"
-    results = model(frame, verbose=False, device=device, imgsz=640, half=half_precision)
+    results = model.predict(frame, verbose=False, device=device, imgsz=640)
     annotated_frame = results[0].plot()  # Draw YOLO bounding boxes!
 
     for result in results:
@@ -54,7 +72,6 @@ def detect_vehicles_by_zone(frame, crossing_type="2-way"):
 
             if crossing_type == "4-way":
                 # Divide by diagonals: if closer to vertical axis -> NS ('left'), else EW ('right')
-                # Scaled by aspect ratio
                 if abs(cx - w/2) / w < abs(cy - h/2) / h:
                     counts["left"] += 1  # Top/Bottom (North-South)
                 else:
